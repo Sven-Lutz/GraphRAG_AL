@@ -1,245 +1,149 @@
-# KIT KlimaCrawler 🌍
+KIT KlimaCrawler & GraphRAG Pipeline 🌍🧠
+=========================================
 
-Pipeline zur systematischen Erfassung von Energie- und Klimarichtlinien bayerischer Kommunen für die **GraphRAG-Analyse**.
+Dieses Repository enthält die vollständige Pipeline zur systematischen Erfassung und Analyse von Energie- und Klimarichtlinien bayerischer Kommunen.
 
-Distributed Packages: https://bwsyncandshare.kit.edu/s/4gTz25xpaYbw6BW 
----
+Das Projekt kombiniert einen verteilten **High-Recall Web-Scraper** (Stage 0) mit einer modernen **GraphRAG-Architektur** (Retrieval-Augmented Generation auf Basis von Knowledge Graphen) (Stage 1-5). So können komplexe semantische Suchen, thematische Analysen und genaue Zählungen in kommunalen Dokumenten durchgeführt werden.
 
-## 🛠 Voraussetzungen
+* * * * *
 
-- Python 3.9+ (empfohlen: 3.10)
-- macOS, Linux oder Windows
-- Stabile Internetverbindung
-- Ausreichend Laufzeit (Großstädte: > 10 Stunden)
+🛠 Voraussetzungen
+------------------
 
----
+Bevor du startest, stelle sicher, dass folgende Software installiert ist:
 
-## 📦 Setup & Installation
+-   **Python 3.9+** (empfohlen: 3.10)
 
-### 1️⃣ Repository klonen
+-   **Neo4j Datenbank** (Desktop oder Server) für den Knowledge Graph
 
-```bash
-git clone <repository-url>
-cd KIT_KlimaCrawler
-```
+-   **Ollama** (für lokale LLM-Inferenz, datenschutzkonform, z.B. für `llama3.1:8b`)
 
----
+-   Ausreichend Laufzeit und ggf. eine GPU (für das lokale Generieren von Embeddings & Graphen)
 
-### 2️⃣ Virtuelle Umgebung erstellen (wi2026)
+* * * * *
 
-#### Windows (PowerShell)
+📦 1. Setup & Installation
+--------------------------
 
-```powershell
-python -m venv wi2026
-.\wi2026\Scripts\Activate.ps1
-```
+### 1.1 Repository klonen
 
-#### Windows (CMD)
+git clone cd KIT_KlimaCrawler
 
-```cmd
-python -m venv wi2026
-wi2026\Scripts\activate
-```
+### 1.2 Virtuelle Umgebung erstellen
 
-#### macOS / Linux
+Es wird dringend empfohlen, eine virtuelle Umgebung zu nutzen.
 
-```bash
-python3 -m venv wi2026
-source wi2026/bin/activate
-```
+**Windows (PowerShell):** python -m venv venv .\venv\Scripts\Activate.ps1
 
-#### Alternative: Conda
+**macOS / Linux:** python3 -m venv venv source venv/bin/activate
 
-```bash
-conda create -n wi2026 python=3.10 -y
-conda activate wi2026
-```
+### 1.3 Abhängigkeiten installieren
 
----
+Installiere alle notwendigen Pakete aus der `requirements.txt`:
 
-### 3️⃣ Abhängigkeiten installieren
+pip install -r crawler/requirements.txt
 
-Im Ordner "crawler" (über cd crawler navigieren) dann:
+*(Hinweis: Für lokale Embeddings mit GPU-Unterstützung muss PyTorch ggf. entsprechend der Systemarchitektur separat installiert werden).*
 
-```bash
-pip install -r requirements.txt
-```
+* * * * *
 
----
+🚀 2. Die Pipeline: Schritt-für-Schritt Anleitung
+-------------------------------------------------
 
-## 👯 Verteiltes Arbeiten (Sharding)
+Die Architektur ist in 5 Hauptphasen unterteilt. Führe die folgenden Befehle nacheinander aus, um vom nackten Datensatz bis zum interaktiven Chat-Agenten zu gelangen.
 
-Um Bayern parallel zu crawlen, werden vorab aufgeteilte Datenbank-Pakete verwendet.
+### Stage 0: Crawling (Datenbeschaffung)
 
-> ⚠️ **WICHTIG:**  
-> In jedem Paket-Ordner heißt die Datei identisch: `crawl.sqlite`.  
-> Der Dateiname muss exakt so bleiben, da der Code darauf referenziert.  
-> Der Inhalt ist jedoch pro Paket einzigartig (unterschiedliche Kommunen).
+Der Crawler sammelt HTML-Seiten und PDFs von kommunalen Webseiten und speichert sie in einer SQLite-Datenbank (`crawler/data/db/crawl.sqlite`).
 
-### Ablauf
+Initialisiere die Seed-Jobs (Startpunkte) und starte den Worker:
 
-1. **Reservieren**  
-   Trage deinen Namen im Repository in die Datei `TRACKER.md` beim gewählten Paket ein (z. B. `pkg_05`) und pushe die Änderung. -> Warnhinweis -> Create Fork
+python -m crawler.scripts.init_seed_jobs python -m crawler.scripts.run_worker
 
-2. **Paket laden**  
-   Lade den entsprechenden Ordner aus der Cloud/GitHub herunter.
+> **Tipp (Mac):** Nutze `caffeinate -i python -m crawler.scripts.run_worker`, um den Mac am Einschlafen zu hindern. (Für Windows: Nutze *Microsoft PowerToys Awake*).
 
-3. **Platzieren**  
-   Kopiere die enthaltene `crawl.sqlite` in:
+*(Für verteiltes Crawlen mit vorab aufgeteilten Datenbank-Paketen siehe unten im Abschnitt "Verteiltes Arbeiten").*
 
-   ```
-   crawler/data/db/
-   ```
+### Stage 1: Chunking (Textzerlegung)
 
-   (Bestehende Datei überschreiben.)
+Um die Dokumente für das Sprachmodell verdaulich zu machen, werden sie in handliche Token-Blöcke (Chunks) zerlegt (hier: 600 Tokens mit 60 Tokens Überlappung).
 
-   Den Ordner muss man manuell anlegen, der ist nicht im GitHub!
+python -m crawler.scripts.chunk_documents --chunk-size 600 --overlap 60 --min-score 15
 
-4. **Starten (ohne Limit)**  
+### Stage 2: Embeddings & Knowledge Graph Extraktion
 
-   ```bash
-   caffeinate -i python3 -m crawler.scripts.run_worker
-   ```
+In dieser Phase wird der Text durchsuchbar gemacht und in strukturierte Entitäten und Beziehungen übersetzt.
 
-5. **Upload nach Abschluss**  
-   Datei umbenennen in:
+**2a. Vector Embeddings generieren (Lokales Modell):** python -m crawler.scripts.generate_embeddings --model paraphrase-multilingual-MiniLM-L12-v2 --neo4j
 
-   ```
-   pkg_XX_DONE_Name.sqlite
-   ```
+**2b. Entitäten & Beziehungen extrahieren (via lokales Ollama):** *Stelle sicher, dass Ollama im Hintergrund läuft und das Modell geladen ist.* python -m crawler.scripts.extract_graph_ollama --model llama3.1:8b --gleaning 1 --chunk-mode
 
-   und wieder hochladen.
+**2c. Export in die Neo4j Datenbank:** Überträgt die extrahierten Daten (Entitäten, Beziehungen, Chunks) in deine laufende Neo4j-Instanz. *(Konfiguriere vorher deine Neo4j-Zugangsdaten in der `crawler/core/config.py` oder per `.env`).* python -m crawler.scripts.export_graph_to_neo4j
 
----
+### Stage 3: Community Detection (Netzwerkanalyse)
 
-## 🏃‍♂️ Crawl starten (Allgemein)
+Gruppiert verwandte Entitäten im Knowledge Graph zu "Communities" und lässt das LLM automatische Reports über diese Themen-Cluster schreiben.
 
-Falls unabhängig von Paketen gearbeitet wird, kann der Umfang manuell gesteuert werden.
+python -m crawler.scripts.detect_communities --algorithm leiden --min-size 3
 
-### Einzel-Lauf (eine Kommune)
+### Stage 4: Querying (Interaktiver Agent)
 
-```bash
-python3 -m crawler.scripts.run_worker --limit 1
-```
+Starte den Multi-Agenten, der Nutzerfragen über einen "Router" entgegennimmt und entscheidet, ob er Vektor-Suche (Local Search), Map-Reduce über Community-Reports (Global Search) oder Cypher-Datenbankabfragen (Text2Cypher) nutzt.
 
-### Batch-Lauf (z. B. 100 Kommunen)
+python -m crawler.scripts.query_agent --interactive
 
-```bash
-python3 -m crawler.scripts.run_worker --limit 100
-```
+* * * * *
 
----
+👯 Verteiltes Arbeiten beim Crawling (Sharding)
+-----------------------------------------------
 
-## ☕ WICHTIG: Standby verhindern
+Wenn wir Bayern im Team parallel crawlen wollen, nutzen wir vorab aufgeteilte Datenbank-Pakete.
 
-Wenn der Rechner in den Ruhezustand geht, bricht die Netzwerkverbindung ab und der Crawl stoppt.
+> ⚠️ **WICHTIG:** In jedem Paket-Ordner heißt die Datei identisch: `crawl.sqlite`. Der Name muss exakt so bleiben.
 
-### macOS
+1.  **Reservieren:** Trage deinen Namen in die `TRACKER.md` beim gewählten Paket ein (z.B. `pkg_05`) und pushe die Änderung.
 
-```bash
-caffeinate -i python3 -m crawler.scripts.run_worker
-```
+2.  **Paket laden:** Lade den Ordner herunter.
 
-### Windows
+3.  **Platzieren:** Erstelle den Ordner `crawler/data/db/` falls er noch nicht existiert und lege die heruntergeladene `crawl.sqlite` genau dort ab.
 
- ### Nutze Tools wie:
+4.  **Starten:** caffeinate -i python -m crawler.scripts.run_worker
 
-- Caffeine  
-- PowerToys Awake  
+5.  **Upload nach Abschluss:** Wenn der Worker durch ist, benenne die Datei um (z.B. in `pkg_05_DONE_Name.sqlite`) und lade sie wieder in die Cloud.
 
-### 🔹 Installation
+* * * * *
 
-1. Gehe auf die offizielle GitHub-Seite von
-Microsoft PowerToys
-2. Klicke auf Releases
-3. Lade die Datei
-PowerToysSetup-xxx-x64.exe herunter
-4. Installieren → fertig
+📊 Monitoring & Erfolgskontrolle (Stage 0)
+------------------------------------------
 
-### 🔹 Aktivieren von „Awake“
+Um während eines laufenden Crawls den Überblick zu behalten, öffne ein zweites Terminalfenster und nutze dieses Monitoring-Script:
 
-1. PowerToys öffnen
-2. Links Awake auswählen
-3. Aktivieren
-4. Modus wählen:
+**Einfacher Puls-Check (Mac/Linux):**
 
-Keep awake indefinitely
+watch -n 30 "echo '=== CRAWLER DASHBOARD ===' &&
 
-Keep awake for a time interval
+sqlite3 crawler/data/db/crawl.sqlite "SELECT 'Status ' || status || ': ' || count() FROM seed_jobs GROUP BY status;" &&
 
-Keep awake until expiration
+echo '---' &&
 
--> Das ist die sauberste Lösung – kein Script, kein Hack.
+echo 'Gesamt-Dokumente:' &&
 
----
+sqlite3 crawler/data/db/crawl.sqlite "SELECT count() FROM documents_raw;""
 
-## 📊 Monitoring & Erfolgskontrolle
+📈 Evaluation (Stage 5)
+-----------------------
 
-### Fortschritt prüfen (Extraktions-Statistik)
+Um die RAG-Architektur wissenschaftlich zu überprüfen (Context Recall, Faithfulness, Claim Accuracy), kann eine synthetische Question-Answering-Evaluation gestartet werden:
 
-```bash
-sqlite3 crawler/data/db/crawl.sqlite "SELECT segment_type, COUNT(*) FROM segments GROUP BY segment_type;"
-```
+python -m crawler.scripts.evaluate --questions 30 --output eval_results.json
 
-### Erfolgreicher Lauf
+⚠ Typische Fehlerquellen
+------------------------
 
-- `run_worker` beendet sich ohne Fehlermeldung  
-- `seed_jobs.status` steht auf `done`  
-- Tabellen `documents_raw` und `segments` sind befüllt  
+-   **Prozess stoppt plötzlich:** Rechner ist in den Standby gegangen. Unbedingt Tools wie *caffeinate* (Mac) oder *Awake* (Windows) nutzen!
 
-- Fehler können aufkommen! Um eine Übersicht zu haben, könnt ihr euer Terminal splitten und 
+-   **Neo4j Fehler beim Export:** Stelle sicher, dass die Neo4j-Datenbank aktiv ist und die Credentials in der Konfigurationsdatei stimmen.
 
-```bash
-while true; do
-  clear;
-  echo "=== CRAWLER PULS ($(date +%H:%M:%S)) ===";
-  sqlite3 crawler/data/db/crawl.sqlite "
-    SELECT 'Status ' || status || ': ' || count(*) FROM seed_jobs GROUP BY status;
-    SELECT 'Gesamt-Dokumente: ' || count(*) FROM documents_raw;
-    SELECT 'Davon PDFs:       ' || count(*) FROM documents_raw WHERE url_canonical LIKE '%.pdf';
-  ";
-  echo "----------------------------------------";
-  echo "Zuletzt gefundene PDFs:";
-  sqlite3 crawler/data/db/crawl.sqlite "SELECT url_canonical FROM documents_raw WHERE url_canonical LIKE '%.pdf' ORDER BY rowid DESC LIMIT 5;";
-  sleep 30;
-done
-```
+-   **Ollama Timeout:** Beim ersten Mal muss das Modell (`llama3.1:8b`) erst heruntergeladen werden (`ollama run llama3.1:8b` vorab im Terminal ausführen).
 
-einfügen. 
-
-### Oder
-
-```bash
-brew install watch
-```
-
-```bash
-watch -n 30 "echo '=== CRAWLER DASHBOARD ===' && \
-sqlite3 crawler/data/db/crawl.sqlite \"SELECT 'Status ' || status || ': ' || count(*) FROM seed_jobs GROUP BY status;\" && \
-echo '---' && \
-echo 'Gesamt-Dokumente:' && \
-sqlite3 crawler/data/db/crawl.sqlite \"SELECT count(*) FROM documents_raw;\" && \
-echo '---' && \
-echo 'Neueste Nachhaltigkeits-PDFs:' && \
-sqlite3 crawler/data/db/crawl.sqlite \"SELECT municipality_id, url_canonical FROM documents_raw WHERE (url_canonical LIKE '%klima%' OR url_canonical LIKE '%solar%' OR url_canonical LIKE '%mobil%' OR url_canonical LIKE '%haushalt%') AND url_canonical LIKE '%.pdf' ORDER BY rowid DESC LIMIT 5;\""
-```
----
-
-## ⚠ Fehlerquellen
-
-- **Netzwerk:** VPN-Abbruch oder instabiles WLAN beendet den Prozess  
-- **Tools:** `pdftotext` muss im Systempfad installiert sein  
-- **Pfad-Fehler:** Die Datenbank muss exakt in `crawler/data/db/` liegen  
-
----
-
-## 📌 Kurzfassung (TL;DR)
-
-```bash
-git clone <repository-url>
-cd KIT_KlimaCrawler
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-caffeinate -i python3 -m crawler.scripts.run_worker
-```
-
+-   **Pfad-Fehler:** Die SQLite-Datenbank muss immer unter exakt `crawler/data/db/crawl.sqlite` liegen.
